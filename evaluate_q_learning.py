@@ -2,6 +2,22 @@ import numpy as np
 from tqdm import tqdm
 
 
+def moving_average(data, window_size):
+    """
+    Produces the moving average from a given array with a given window size.
+    The window slides along the array and averages the values.
+
+    [1, 2, 3, 4] with window size 3 [1,1,1] -> [2,
+    (1 + 2 + 3) / 3 = 6 / 3 = 2 (1/3 + 2/3 + 3/3) = 6/3 = 2)
+    (2 + 3 + 4) / 3 = 9 / 3 = 3 (2/3 + 3/3 + 4/3) = 9/3 = 3)
+
+    :param data: data array
+    :param window_size: the window size
+    :return: the moving average array
+    """
+    return np.convolve(data, np.ones(window_size), 'valid') / window_size
+
+
 def evaluate_agent(env, max_steps, n_eval_episodes, Q_table, seed):
     """
     Evaluate the agent for ``n_eval_episodes`` episodes and returns average reward and std of reward.

@@ -34,28 +34,61 @@ class PositionalWrapper(gym.ObservationWrapper):
 
         return agent_pos[1] * width + agent_pos[0]
 
-    # def observation(self, obs):
-    #     """
-    #     Calculates a unique integer for each (position, direction) pair.
-    #     """
-    #
-    #     agent_pos = self.unwrapped.agent_pos
-    #     agent_dir = self.unwrapped.agent_dir
-    #
-    #     pos_idx = agent_pos[1] * self.unwrapped.width + agent_pos[0]
-    #
-    #     print(agent_pos, agent_dir, pos_idx)
-    #
-    #     # Calculate the final unique index.
-    #     # Formula ensures every (pos_idx, agent_dir) pair maps to a unique number.
-    #     # Example: For a 7x7 grid (49 positions):
-    #     # - (pos 0, dir 0) -> 0*4 + 0 = 0
-    #     # - (pos 0, dir 1) -> 0*4 + 1 = 1
-    #     # - (pos 1, dir 0) -> 1*4 + 0 = 4
-    #     # - (pos 1, dir 1) -> 1*4 + 1 = 5
-    #     state_idx = pos_idx * 4 + agent_dir
-    #
-    #     return state_idx
+
+class FullStateWrapper(gym.ObservationWrapper):
+    """
+    Encodes the full state of the game (agent position and all text block positions)
+    into a single, unique integer. This makes the environment fully observable.
+
+    More on the encoding on the wiki page:
+    https://en.wikipedia.org/wiki/Row-_and_column-major_order
+    """
+
+    def __init__(self, env):
+        super().__init__(env)
+
+        # The number of possible locations for any single object.
+        self.num_cells = env.width * env.height
+
+        # The total state space size is (num_cells)^(number of dynamic objects).
+        # We have 4 dynamic objects: Agent, 'FLAG' text, 'IS' text, 'WIN' text.
+        # WARNING: This number can get astronomically large!
+        observation_space_size = self.num_cells ** 4
+
+        print("=" * 50)
+        print(f"USING FULL STATE REPRESENTATION")
+        print(f"Grid size: {env.width}x{env.height} ({self.num_cells} cells)")
+        print(f"Number of dynamic objects: 4")
+        print(f"Total state space size: {self.num_cells}^4 = {observation_space_size}")
+        print("=" * 50)
+
+        self.observation_space = gym.spaces.Discrete(observation_space_size)
+
+    def observation(self, obs):
+        """
+        Calculates the unique state index based on all object positions.
+        """
+        # Get the current positions of all dynamic objects.
+        agent_pos = self.unwrapped.agent_pos
+        flag_text_pos = self.unwrapped.text_objects["FLAG"].pos
+        is_text_pos = self.unwrapped.text_objects["IS"].pos
+        win_text_pos = self.unwrapped.text_objects["WIN"].pos
+
+        # Convert each (x,y) tuple to a single integer index from 0 to num_cells-1.
+        agent_idx = agent_pos[1] * self.unwrapped.width + agent_pos[0]
+        flag_idx = flag_text_pos[1] * self.unwrapped.width + flag_text_pos[0]
+        is_idx = is_text_pos[1] * self.unwrapped.width + is_text_pos[0]
+        win_idx = win_text_pos[1] * self.unwrapped.width + win_text_pos[0]
+
+        # Combine these four indices into a single unique state ID.
+        # This works like converting a number to a different base, where the base is `num_cells`.
+        # This guarantees that every unique combination of positions maps to a unique integer.
+        state_idx = agent_idx
+        state_idx = state_idx * self.num_cells + flag_idx
+        state_idx = state_idx * self.num_cells + is_idx
+        state_idx = state_idx * self.num_cells + win_idx
+
+        return state_idx
 
 
 TEXT_TO_IMAGE = {
@@ -142,9 +175,9 @@ class BabaIsYouGridEnv(MiniGridEnv):
         # W = Wall, B = Baba Agent, F = Flag (Goal)
         # f = 'FLAG' text, i = 'IS' text, w = 'WIN' text
         # '.' = empty space
-
-        self.text_objects.clear()  # Reset from previous episodes
+        #
         # pos[y, x] = y is col, x is row
+        self.text_objects.clear()
 
         for y, row in enumerate(self.level_map):
             for x, char in enumerate(row):
@@ -175,42 +208,61 @@ class BabaIsYouGridEnv(MiniGridEnv):
         reward = -0.01
         terminated = False
 
-        # Update agent direction for rendering purposes
         self.agent_dir = ACTION_TO_DIR[action]
-
-        # Get the desired new position
         move_vec = ACTION_VECTOR[action]
-        target_pos = self.agent_pos + move_vec
+
+        target_pos = tuple(self.agent_pos + move_vec)
+
+        objects_to_push = []
+        can_move = False
+
+        # Check the first cell in front of the agent
         target_cell = self.grid.get(*target_pos)
 
-        # Move if the cell is empty or can be overlapped
         if target_cell is None or target_cell.can_overlap():
-            self.agent_pos = tuple(target_pos)
-
-        # Handle pushing a text block
+            can_move = True
         elif isinstance(target_cell, Text):
-            push_pos = tuple(target_pos + move_vec)
-            if self.grid.get(*push_pos) is None:  # Check if space behind is empty
-                # Move the text block
-                self.grid.set(*push_pos, target_cell)
-                target_cell.pos = push_pos
-                self.grid.set(*target_pos, None)
-                # Move the agent
-                self.agent_pos = tuple(target_pos)
+            # Potential push. Check the entire chain.
+            check_pos = target_pos
 
-        # --- Post-Action Checks (run every step) ---
+            while True:
+                # Boundary Check: Prevents crashing at the edge of the grid
+                if not (0 <= check_pos[0] < self.width and 0 <= check_pos[1] < self.height):
+                    can_move = False
+                    break
 
+                cell = self.grid.get(*check_pos)
+                if cell is None: break  # Chain can be pushed
+                if isinstance(cell, Text):
+                    objects_to_push.append(cell)
+                    check_pos = tuple(np.array(check_pos) + move_vec)
+                else:
+                    can_move = False  # Chain is blocked
+                    break
+
+        if can_move:
+            for obj in reversed(objects_to_push):
+                old_obj_pos = obj.pos
+                new_obj_pos = tuple(old_obj_pos + move_vec)
+
+                self.grid.set(*new_obj_pos, obj)
+                self.grid.set(*old_obj_pos, None)
+
+                obj.pos = new_obj_pos
+
+            old_agent_pos = self.agent_pos
+            self.grid.set(*old_agent_pos, None)
+            self.agent_pos = target_pos
+
+        # --- Post-Action Checks (unchanged) ---
         self._check_rules()
 
         current_cell = self.grid.get(*self.agent_pos)
         if current_cell is not None and current_cell.type == "goal" and self.rule_is_win_active:
             terminated = True
-            reward = 1
+            reward = 50.0
 
-        # 3. Check for truncation due to the step limit
         truncated = self.step_count >= self.max_steps
-
-        # Generate observation and return
         obs = self.gen_obs()
         return obs, reward, terminated, truncated, {}
 
