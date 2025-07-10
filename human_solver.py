@@ -1,4 +1,4 @@
-from baba_is_you_env import BabaIsYouGridEnv, PositionalWrapper, FullStateWrapper
+from baba_is_you_env import BabaIsYouGridEnv, FullStateWrapper
 import time
 
 # --- Define the Level Layout ---
@@ -8,10 +8,10 @@ import time
 LEVEL_LAYOUT = [
     ".......",
     ".......",
-    "..B....",
-    "...fF..",
-    "..i....",
-    "...w...",
+    "..A.K.D",
+    "...k...",
+    "...i...",
+    "...p...",
     "......."
 ]
 
@@ -27,7 +27,7 @@ if __name__ == "__main__":
     for i in range(10):
         print(env.action_space.sample())
 
-    actions = [1,2,2,2,3,3]
+    actions = [1,1,1,1,2]
 
     # actions.extend([3] * 20)
 
@@ -42,6 +42,6 @@ if __name__ == "__main__":
             obs, info = env.reset()
             break
 
-        time.sleep(2)
+        time.sleep(1)
 
     env.close()

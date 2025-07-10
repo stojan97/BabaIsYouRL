@@ -148,7 +148,7 @@ def to_pos(idx, num_cols):
 LEVEL_LAYOUT = [
     "WWWWWWW",
     "W.....W",
-    "W.B...W",
+    "W.A...W",
     "W..fF.W",
     "W.i...W",
     "W..w..W",
