@@ -10,7 +10,6 @@ import warnings
 from baba_is_you_env import BabaIsYouGridEnv, MyImgObsWrapper
 
 
-# Create a custom feature extractor for small observations
 class SmallCNN(BaseFeaturesExtractor):
     def __init__(self, observation_space, features_dim=512):
         super().__init__(observation_space, features_dim)
@@ -42,7 +41,6 @@ class SmallCNN(BaseFeaturesExtractor):
 
 
 def main():
-    # 1. Create and wrap the environment
     env = BabaIsYouGridEnv(size=7, render_mode="rgb_array")  # Using original size
     env = FullyObsWrapper(env)
     obs, _ = env.reset()
@@ -50,13 +48,11 @@ def main():
 
     print("Environment check passed!")
 
-    # 2. Instantiate the DQN Model with custom policy
     policy_kwargs = dict(
         features_extractor_class=SmallCNN,
         features_extractor_kwargs=dict(features_dim=256),  # Reduced feature dim
     )
 
-    # Check if tensorboard is installed
     # try:
     #     import tensorboard
     #     tensorboard_log = "./baba_dqn_tensorboard/"
@@ -80,7 +76,6 @@ def main():
     #     tensorboard_log=tensorboard_log  # Now conditionally set
     # )
     #
-    # # 3. Train the Model
     # print("\n--- Starting Training ---")
     # model.learn(total_timesteps=100000, progress_bar=True)
     # print("--- Training Finished ---")

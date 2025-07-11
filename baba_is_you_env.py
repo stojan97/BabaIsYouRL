@@ -13,42 +13,58 @@ from minigrid.minigrid_env import MiniGridEnv
 
 
 class FullStateWrapper(gym.ObservationWrapper):
+    """
+    Encodes the full state, including the positions of ALL balls present in the level.
+
+    More info about the encoding (https://en.wikipedia.org/w/index.php?title=Row-_and_column-major_order)
+    """
+
     def __init__(self, env):
         super().__init__(env)
         self.num_cells = env.width * env.height
 
-        # DYNAMIC OBJECTS: Agent, FLAG text, IS text, WIN text, PUSH text, STOP text, DEFEAT text,
-        # KEY text, DOOR text, BALL text, Key obj, Door obj, Ball obj
-        # This is getting very large! We must be selective.
-        # Let's track the agent and the NOUN objects.
-        self.tracked_objects = ["BABA", "KEY", "DOOR", "BALL", "FLAG", "IS", "WIN"]  # simplified for now
-        self.num_dynamic_objects = len(self.tracked_objects)
+        self.num_balls = 0
 
+        for row in env.level_map:
+            self.num_balls += row.count('O')
+
+        self.num_dynamic_objects = 4 + self.num_balls
         observation_space_size = self.num_cells ** self.num_dynamic_objects
-        # ... (print statements) ...
+
+        print("=" * 50)
+        print(f"USING FULL STATE REPRESENTATION (EXPLICIT CONFIG)")
+        print(f"Grid size: {env.width}x{env.height} ({self.num_cells} cells)")
+        print(f"Tracking {self.num_dynamic_objects} dynamic objects (Agent, 3xText, {self.num_balls}xBall)")
+        print(f"Total state space size: {self.num_cells}^{self.num_dynamic_objects} = {observation_space_size}")
+        print("=" * 50)
+
         self.observation_space = gym.spaces.Discrete(observation_space_size)
 
     def observation(self, obs):
-        # This needs a robust way to get the primary instance of each object
-        # This is a simplification and might need adjustment for levels with multiple keys, etc.
         def get_pos_idx(obj_list):
             if obj_list and obj_list[0].pos:
                 return obj_list[0].pos[1] * self.unwrapped.width + obj_list[0].pos[0]
-            return 0  # Default to 0 if object doesn't exist
+            return 0
 
-        indices = [
-            self.unwrapped.agent_pos[1] * self.unwrapped.width + self.unwrapped.agent_pos[0],
-            get_pos_idx(self.unwrapped.noun_objects.get("KEY")),
-            get_pos_idx(self.unwrapped.noun_objects.get("DOOR")),
-            get_pos_idx(self.unwrapped.noun_objects.get("BALL")),
-            get_pos_idx(self.unwrapped.text_blocks.get("FLAG")),
-            get_pos_idx(self.unwrapped.text_blocks.get("IS")),
-            get_pos_idx(self.unwrapped.text_blocks.get("WIN"))
+        agent_idx = self.unwrapped.agent_pos[1] * self.unwrapped.width + self.unwrapped.agent_pos[0]
+        flag_idx = get_pos_idx(self.unwrapped.text_blocks.get("FLAG"))
+        is_idx = get_pos_idx(self.unwrapped.text_blocks.get("IS"))
+        win_idx = get_pos_idx(self.unwrapped.text_blocks.get("WIN"))
+
+        balls = self.unwrapped.noun_objects.get("BALL", [])
+        ball_indices = [
+            b.pos[1] * self.unwrapped.width + b.pos[0] for b in balls if b.pos is not None
         ]
 
+        # TODO: Is sorting required for consistency of the state idx?
+        # ball_indices.sort()
+
+        all_indices = [agent_idx, flag_idx, is_idx, win_idx] + ball_indices
+
         state_idx = 0
-        for idx in indices:
+        for idx in all_indices:
             state_idx = state_idx * self.num_cells + idx
+
         return state_idx
 
 
@@ -67,21 +83,17 @@ TEXT_TO_IMAGE = {
     'WIN': Image.open('assets/win.png').convert('RGBA'),
     'DOOR': Image.open('assets/door.png').convert('RGBA'),
     'KEY': Image.open('assets/key.png').convert('RGBA'),
-    'BALL': Image.open('assets/ball_object.png').convert('RGBA'),
+    'BALL': Image.open('assets/ball.png').convert('RGBA'),
     'STOP': Image.open('assets/stop.png').convert('RGBA'),
     'PUSH': Image.open('assets/push.png').convert('RGBA'),
     'DEFEAT': Image.open('assets/defeat.png').convert('RGBA'),
 }
 
 OBJ_TO_IMAGE = {
-
-    'KEY': Image.open('assets/key_object.png').convert('RGBA'),
-    'DOOR': Image.open('assets/door_object.png').convert('RGBA'),
     'BALL': Image.open('assets/ball_object.png').convert('RGBA'),
 }
 
 
-# --- World Object classes remain the same ---
 class Text(WorldObj):
     def __init__(self, text_label: str):
         if text_label not in OBJECT_TO_IDX:
@@ -104,46 +116,6 @@ class Text(WorldObj):
 
     def can_pickup(self):
         return False
-
-    def render(self, img):
-        if not self.image: return
-        png_pil = self.image.resize((img.shape[1], img.shape[0]), resample=Image.Resampling.LANCZOS)
-        tile_pil = Image.fromarray(img)
-        tile_pil.paste(png_pil, (0, 0), mask=png_pil)
-        img[:] = np.array(tile_pil)
-
-
-class Key(WorldObj):
-    def __init__(self):
-        super().__init__('key', 'yellow')
-        self.image = OBJ_TO_IMAGE['KEY']
-        self._pos = None
-
-    @property
-    def pos(self): return self._pos
-
-    @pos.setter
-    def pos(self, value): self._pos = value
-
-    def render(self, img):
-        if not self.image: return
-        png_pil = self.image.resize((img.shape[1], img.shape[0]), resample=Image.Resampling.LANCZOS)
-        tile_pil = Image.fromarray(img)
-        tile_pil.paste(png_pil, (0, 0), mask=png_pil)
-        img[:] = np.array(tile_pil)
-
-
-class Door(WorldObj):
-    def __init__(self):
-        super().__init__('door', 'blue')
-        self.image = OBJ_TO_IMAGE['DOOR']
-        self._pos = None
-
-    @property
-    def pos(self): return self._pos
-
-    @pos.setter
-    def pos(self, value): self._pos = value
 
     def render(self, img):
         if not self.image: return
@@ -183,7 +155,7 @@ class BabaIsYouGridEnv(MiniGridEnv):
         self.noun_objects: Dict[str, List[WorldObj]] = {}
         self.active_rules: Dict[str, Set[str]] = {}
         self._pre_move_obj = None
-        mission_space = MissionSpace(mission_func=lambda: "achieve the win condition")
+        mission_space = MissionSpace(mission_func=lambda: "get to the green goal square to win", )
         super().__init__(mission_space=mission_space, width=width, height=height, **kwargs)
         self.action_space = gym.spaces.Discrete(4)
 
@@ -197,10 +169,9 @@ class BabaIsYouGridEnv(MiniGridEnv):
         self.text_blocks.clear()
         self.noun_objects.clear()
 
-        # --- SIMPLIFIED: No 'B' or 'b' characters ---
-        char_to_noun = {'F': 'FLAG', 'D': 'DOOR', 'K': 'KEY', 'O': 'BALL'}
+        char_to_noun = {'F': 'FLAG', 'O': 'BALL'}
         char_to_text = {
-            'f': "FLAG", 'i': "IS", 'w': "WIN", 'd': "DOOR", 'k': "KEY",
+            'f': "FLAG", 'i': "IS", 'w': "WIN",
             's': "STOP", 'p': "PUSH", 'e': "DEFEAT", 'o': "BALL"
         }
 
@@ -208,30 +179,20 @@ class BabaIsYouGridEnv(MiniGridEnv):
             for x, char in enumerate(row):
                 obj, obj_type = None, None
                 if char == 'A':
-                    self.agent_pos = (x, y);
+                    self.agent_pos = (x, y)
                     self.agent_dir = 0
                 elif char == 'W':
                     obj = Wall()
                 elif char in char_to_noun:
                     noun_type = char_to_noun[char]
 
-                    # --- THIS IS THE KEY LOGIC ---
-                    # Create the native object
                     if noun_type == "FLAG":
                         obj = Goal()
-                        # Allow the agent to walk onto it
                         obj.can_overlap = lambda: True
-                    elif noun_type == "DOOR":
-                        obj = Door()
-                    elif noun_type == "KEY":
-                        obj = Key()
                     elif noun_type == "BALL":
                         obj = Ball()
-
-                    # ** DYNAMICALLY ATTACH THE NOUN IDENTITY **
                     if obj:
                         obj.noun_type = noun_type
-                    # --- END OF KEY LOGIC ---
 
                     obj_type = noun_type
 
@@ -251,15 +212,11 @@ class BabaIsYouGridEnv(MiniGridEnv):
         if self.agent_pos is None: raise ValueError("Level map must contain an agent 'A'.")
 
     def _check_rules(self):
-        VALID_NOUNS = {"FLAG", "DOOR", "KEY", "BALL", "WALL"}
+        VALID_NOUNS = {"FLAG", "BALL", "WALL"}
         VALID_PROPERTIES = {"PUSH", "STOP", "WIN", "DEFEAT"}
 
-        # --- FIX for Identity Crisis ---
-        # 1. Set default properties for NOUNS (the physical objects)
         self.active_rules = {"WALL": {"STOP"}}  # Physical WALL is STOP
 
-        # 2. Set default properties for all TEXT blocks (they are always PUSH)
-        # We store them with a 'TXT_' prefix to distinguish them
         for text_type in VALID_NOUNS.union(VALID_PROPERTIES).union({"IS"}):
             self.active_rules[f"TXT_{text_type}"] = {"PUSH"}
 
@@ -267,10 +224,7 @@ class BabaIsYouGridEnv(MiniGridEnv):
 
         for is_block in self.text_blocks["IS"]:
             ix, iy = is_block.pos
-
-            # Horizontal Check
-            # --- FIX for AssertionError ---
-            if ix > 0 and ix < self.width - 1:
+            if 0 < ix < self.width - 1:
                 noun_block = self.grid.get(ix - 1, iy)
                 prop_block = self.grid.get(ix + 1, iy)
                 if (noun_block and prop_block and
@@ -280,9 +234,7 @@ class BabaIsYouGridEnv(MiniGridEnv):
                     if noun not in self.active_rules: self.active_rules[noun] = set()
                     self.active_rules[noun].add(prop)
 
-            # Vertical Check
-            # --- FIX for AssertionError ---
-            if iy > 0 and iy < self.height - 1:
+            if 0 < iy < self.height - 1:
                 noun_block = self.grid.get(ix, iy - 1)
                 prop_block = self.grid.get(ix, iy + 1)
                 if (noun_block and prop_block and
@@ -294,17 +246,12 @@ class BabaIsYouGridEnv(MiniGridEnv):
 
     def _has_property(self, obj, prop):
         if obj is None: return False
-
-        # --- FIX for Identity Crisis ---
         obj_type = ""
         if isinstance(obj, Text):
-            # It's a text block, check for its text-specific rule
             obj_type = f"TXT_{obj.text_label}"
         elif hasattr(obj, 'noun_type'):
-            # It's a physical object, use its noun identity
             obj_type = obj.noun_type
         else:
-            # It's a basic object like a Wall
             obj_type = obj.type.upper()
 
         return obj_type in self.active_rules and prop in self.active_rules[obj_type]
@@ -317,57 +264,51 @@ class BabaIsYouGridEnv(MiniGridEnv):
 
         self.agent_dir = ACTION_TO_DIR[action]
         move_vec = ACTION_VECTOR[action]
+
         target_pos = tuple(self.agent_pos + move_vec)
-        target_cell = self.grid.get(*target_pos)
 
-        # --- CONSISTENT "SOLID BY DEFAULT" LOGIC ---
-
-        # Case 1: The target cell is empty. The agent can always move.
-        if target_cell is None:
-            # We still need to handle not erasing the Goal if we are moving OFF of it.
-            object_at_agent_pos = self.grid.get(*self.agent_pos)
-            if not isinstance(object_at_agent_pos, Goal):
-                self.grid.set(*self.agent_pos, None)
-            self.agent_pos = target_pos
-
-        # Case 2: The target cell has an object. Check its properties to see if we can interact.
+        if not (0 <= target_pos[0] < self.width and 0 <= target_pos[1] < self.height):
+            pass
         else:
-            # Sub-case 2a: The object has the WIN property, allowing the agent to move onto it.
-            if self._has_property(target_cell, "WIN"):
-                object_at_agent_pos = self.grid.get(*self.agent_pos)
-                if not isinstance(object_at_agent_pos, Goal):
+            target_cell = self.grid.get(*target_pos)
+
+            object_at_agent_pos = self.grid.get(*self.agent_pos)
+
+            # Case 1: The target cell is empty. The agent can always move.
+            if target_cell is None:
+                if not (self._has_property(object_at_agent_pos, "WIN") or self._has_property(object_at_agent_pos,
+                                                                                             "DEFEAT")):
                     self.grid.set(*self.agent_pos, None)
                 self.agent_pos = target_pos
 
-            # Sub-case 2b: The object has the PUSH property.
-            elif self._has_property(target_cell, "PUSH"):
-                # This is the robust multi-push logic we built.
-                objects_to_push = []
-                is_chain_pushable = True
-                check_pos = target_pos
-                while True:
-                    if not (0 <= check_pos[0] < self.width and 0 <= check_pos[1] < self.height):
-                        is_chain_pushable = False; break
-                    cell = self.grid.get(*check_pos)
-                    if cell is None: break
-                    if self._has_property(cell, "PUSH"):
-                        objects_to_push.append(cell)
-                        check_pos = tuple(np.array(check_pos) + move_vec)
-                    else:
-                        is_chain_pushable = False; break
+            # Case 2: The target cell has an object. Check its properties.
+            else:
+                # Sub-case 2a: The object has WIN or DEFEAT, allowing the agent to move onto it.
+                if self._has_property(target_cell, "WIN") or self._has_property(target_cell, "DEFEAT"):
+                    if not (self._has_property(object_at_agent_pos, "WIN") or self._has_property(object_at_agent_pos,
+                                                                                                 "DEFEAT")):
+                        self.grid.set(*self.agent_pos, None)
+                    self.agent_pos = target_pos
 
-                if is_chain_pushable:
-                    is_special_move = False
-                    if len(objects_to_push) > 0 and isinstance(objects_to_push[0], Key):
-                        door_pos = tuple(objects_to_push[0].pos + move_vec)
-                        if isinstance(self.grid.get(*door_pos), Door):
-                            self.grid.set(*objects_to_push[0].pos, None);
-                            self.grid.set(*door_pos, None)
-                            self.grid.set(*self.agent_pos, None);
-                            self.agent_pos = target_pos
-                            is_special_move = True
+                # Sub-case 2b: The object has the PUSH property.
+                elif self._has_property(target_cell, "PUSH"):
+                    objects_to_push = []
+                    is_chain_pushable = True
+                    check_pos = target_pos
+                    while True:
+                        if not (0 <= check_pos[0] < self.width and 0 <= check_pos[1] < self.height):
+                            is_chain_pushable = False;
+                            break
+                        cell = self.grid.get(*check_pos)
+                        if cell is None: break
+                        if self._has_property(cell, "PUSH"):
+                            objects_to_push.append(cell)
+                            check_pos = tuple(np.array(check_pos) + move_vec)
+                        else:
+                            is_chain_pushable = False;
+                            break
 
-                    if not is_special_move:
+                    if is_chain_pushable:
                         for obj in reversed(objects_to_push):
                             old_obj_pos, new_obj_pos = obj.pos, tuple(obj.pos + move_vec)
                             self.grid.set(*new_obj_pos, obj);
@@ -376,16 +317,14 @@ class BabaIsYouGridEnv(MiniGridEnv):
                         self.grid.set(*self.agent_pos, None);
                         self.agent_pos = target_pos
 
-            # Sub-case 2c (Implicit): The object is not WIN and not PUSH. It is therefore STOP.
-            # No 'else' block needed. The move is blocked.
-
-        # --- POST-ACTION CHECKS ---
         agent_overlaps_cell = self.grid.get(*self.agent_pos)
 
         if self._has_property(agent_overlaps_cell, "DEFEAT"):
-            reward = -50.0; truncated = True
+            reward = -50.0
+            truncated = True
         elif self._has_property(agent_overlaps_cell, "WIN"):
-            reward = 50.0; terminated = True
+            reward = 50.0
+            terminated = True
 
         if not truncated and self.step_count >= self.max_steps:
             truncated = True

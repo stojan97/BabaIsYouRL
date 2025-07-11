@@ -6,13 +6,12 @@ import time
 # f = 'FLAG' text, i = 'IS' text, w = 'WIN' text
 # '.' = empty space
 LEVEL_LAYOUT = [
-    ".......",
-    ".......",
-    "..A.K.D",
-    "...k...",
-    "...i...",
-    "...p...",
-    "......."
+    ".A...WF",
+    "....OW.",
+    ".f...W.",
+    ".i...W.",
+    "..w....",
+    "....oie"
 ]
 
 if __name__ == "__main__":
@@ -27,7 +26,7 @@ if __name__ == "__main__":
     for i in range(10):
         print(env.action_space.sample())
 
-    actions = [1,1,1,1,2]
+    actions = [0,0,0,0,1]
 
     # actions.extend([3] * 20)
 
